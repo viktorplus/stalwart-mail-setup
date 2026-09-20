@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Monday 05:00 UTC. The code will not change often; stalwartlabs/stalwart
+    # and caddy will. The scheduled run is what catches an upstream change
+    # that breaks the setup, before someone hits it on a real server.
+    - cron: "0 5 * * 1"
+
+jobs:
+  unit:
+    name: config parser and templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: python3 tests/test_config.py
+
+  lint:
+    name: shell syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: POSIX sh syntax
+        run: |
+          for script in bin/*.sh tests/*.sh; do
+            sh -n "$script" && echo "ok $script"
+          done
+      - name: shellcheck
+        run: shellcheck --shell=sh bin/*.sh tests/*.sh
+      - name: Executable bits
+        run: |
+          for script in bin/*.sh bin/apply-config.py tests/integration.sh; do
+            test -x "$script" || { echo "not executable: $script"; exit 1; }
+            echo "ok $script"
+          done
+
+  integration:
+    name: live Stalwart
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: End-to-end run
+        run: tests/integration.sh

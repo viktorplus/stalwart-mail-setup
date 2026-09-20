@@ -13,7 +13,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 PASSWORDS="$ROOT/mailbox-passwords.txt"
 
 [ -r "$PASSWORDS" ] || {

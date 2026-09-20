@@ -145,6 +145,7 @@ Skipping this means the certificate served on SMTP and IMAP quietly expires.
 | `bin/sw-cli.sh` | direct `stalwart-cli` access for anything not covered above |
 | `compose/` | the Docker stack and the Caddy templates |
 | `docs/` | DNS, mail clients, TLS, troubleshooting |
+| `tests/` | unit tests and an end-to-end run against a throwaway server |
 
 Anything the scripts do not cover is reachable through the admin panel at
 `https://<hostname>/` (sign in as `admin` with `admin_password`) or through
@@ -154,6 +155,20 @@ Anything the scripts do not cover is reachable through the admin panel at
 bin/sw-cli.sh query Account
 bin/sw-cli.sh describe Domain
 ```
+
+## Tests
+
+```sh
+python3 tests/test_config.py   # config parsing and templates, under a second
+tests/integration.sh           # the whole setup against a real Stalwart
+```
+
+The integration run refuses to start if a `stalwart` container already exists,
+publishes nothing on a host port and cleans up after itself, so it is safe to
+run on a machine that already serves mail. CI runs both weekly, which is what
+catches an upstream change before someone hits it on a fresh install.
+
+Details, and what to do when a run goes red: [tests/README.md](tests/README.md).
 
 ## Licence
 

@@ -16,3 +16,7 @@ compose/snappymail_data/
 plans/
 *.key
 *.pem
+
+# Python bytecode
+__pycache__/
+*.pyc

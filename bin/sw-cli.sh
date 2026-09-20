@@ -15,7 +15,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 CONF="$ROOT/mailserver.conf"
 PLANS="$ROOT/plans"
 
@@ -32,7 +32,7 @@ password=$(printf '%s' "$password" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; 
 
 mkdir -p "$PLANS"
 
-STALWART_USER=admin
+STALWART_USER="admin"
 STALWART_PASSWORD=$password
 export STALWART_USER STALWART_PASSWORD
 

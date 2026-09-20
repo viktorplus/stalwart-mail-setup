@@ -14,7 +14,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 CLI="$ROOT/bin/sw-cli.sh"
 WANTED=${1:-}
 

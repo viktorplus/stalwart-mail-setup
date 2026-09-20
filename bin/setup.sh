@@ -10,7 +10,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 CONF="$ROOT/mailserver.conf"
 COMPOSE="$ROOT/compose/docker-compose.yml"
 

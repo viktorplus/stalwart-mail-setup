@@ -50,22 +50,23 @@ def read_conf():
     conf["domains"] = []
     conf["mailboxes"] = []
 
-    for lineno, raw in enumerate(open(CONF, encoding="utf-8"), 1):
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-        if "=" not in line:
-            die("%s line %d: expected `key = value`" % (CONF, lineno))
-        key, value = (part.strip() for part in line.split("=", 1))
+    with open(CONF, encoding="utf-8") as handle:
+        for lineno, raw in enumerate(handle, 1):
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            if "=" not in line:
+                die("%s line %d: expected `key = value`" % (CONF, lineno))
+            key, value = (part.strip() for part in line.split("=", 1))
 
-        if key in SCALARS:
-            conf[key] = value.strip("'\"")
-        elif key == "domain":
-            conf["domains"].append(value.lower())
-        elif key == "mailbox":
-            conf["mailboxes"].append(parse_mailbox(value, lineno))
-        else:
-            die("%s line %d: unknown key `%s`" % (CONF, lineno, key))
+            if key in SCALARS:
+                conf[key] = value.strip("'\"")
+            elif key == "domain":
+                conf["domains"].append(value.lower())
+            elif key == "mailbox":
+                conf["mailboxes"].append(parse_mailbox(value, lineno))
+            else:
+                die("%s line %d: unknown key `%s`" % (CONF, lineno, key))
 
     for key in ("hostname", "acme_email", "admin_password"):
         if not conf[key]:

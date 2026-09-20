@@ -27,7 +27,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
 CONF="$ROOT/mailserver.conf"
 CLI="$ROOT/bin/sw-cli.sh"
 CERTS="$ROOT/compose/caddy_data/caddy/certificates"
@@ -41,7 +41,7 @@ DOMAIN=$(sed -n 's/^[[:space:]]*hostname[[:space:]]*=[[:space:]]*//p' "$CONF" \
 	| head -1 | sed 's/[[:space:]]*$//; s/^"\(.*\)"$/\1/')
 [ -n "$DOMAIN" ] || { echo "reimport-cert: hostname not set in $CONF" >&2; exit 1; }
 
-CRT=$(ls "$CERTS"/*/"$DOMAIN"/"$DOMAIN".crt 2>/dev/null | head -1 || true)
+CRT=$(find "$CERTS" -type f -path "*/$DOMAIN/$DOMAIN.crt" 2>/dev/null | head -1)
 [ -n "$CRT" ] && [ -r "$CRT" ] || {
 	echo "reimport-cert: no certificate for $DOMAIN yet" >&2
 	exit 1

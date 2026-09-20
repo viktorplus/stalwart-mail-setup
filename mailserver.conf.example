@@ -26,6 +26,9 @@ acme_email = admin@example.com
 # Password for the Stalwart administrator account (web panel at
 # https://<hostname>/ and the command line tools). Choose a long one:
 # the server rejects weak passwords.
+#
+# A `#` starts a comment anywhere on a line, so a password containing one
+# would be cut short. Either avoid `#` or pick a longer passphrase without it.
 admin_password = change-this-to-a-long-unique-passphrase
 
 # Hostname for the optional SnappyMail webmail. It needs its own A record.
