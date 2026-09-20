@@ -1,0 +1,35 @@
+# Generated into compose/Caddyfile by bin/setup.sh. Edit the template, not
+# the generated file: the next run overwrites it.
+
+{
+	email {{ACME_EMAIL}}
+}
+
+# The mail hostname. Caddy obtains the TLS certificate here — the same
+# certificate Stalwart serves on SMTP and IMAP once bin/reimport-cert.sh has
+# copied it into the database — and publishes the Stalwart admin panel.
+{{MAIL_HOST}} {
+	encode zstd gzip
+
+	log {
+		output file /data/access.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+		format json
+	}
+
+	# Vulnerability scanners probing for other software. Answer 404 instead
+	# of forwarding the noise to Stalwart.
+	@scanner {
+		path *.php* *.cgi* *xmlrpc* */wp-* *wordpress* *joomla* *drupal* *.git* *../* *..*
+	}
+	respond @scanner 404
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+	}
+
+	reverse_proxy stalwart:8080
+}

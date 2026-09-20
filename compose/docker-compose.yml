@@ -1,0 +1,65 @@
+# The whole stack: Caddy terminates HTTPS and obtains the TLS certificate,
+# Stalwart serves SMTP and IMAP, SnappyMail is the optional webmail.
+#
+# Started by ../bin/setup.sh, which first writes .env and Caddyfile from
+# ../mailserver.conf. Do not start it by hand before those exist.
+
+services:
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy_data:/data
+      - ./caddy_config:/config
+    networks:
+      - mail_net
+
+  stalwart:
+    image: stalwartlabs/stalwart:latest
+    container_name: stalwart
+    restart: unless-stopped
+    # The config file describes the data store only. Hostname, listeners,
+    # certificates, domains and accounts live in the database and are applied
+    # by bin/apply-config.py.
+    command: ["--config", "/etc/stalwart/config.json"]
+    # .env carries STALWART_RECOVERY_ADMIN=admin:<admin_password>.
+    env_file:
+      - .env
+    volumes:
+      - ./stalwart:/etc/stalwart:ro
+      - stalwart_data:/var/lib/stalwart
+      # Certificates issued by Caddy. The whole tree is mounted so a renewal
+      # or a change of ACME directory does not turn the mount into a stale
+      # file. bin/reimport-cert.sh copies the pair into Stalwart's database.
+      - ./caddy_data/caddy/certificates:/certs:ro
+    ports:
+      - "25:25"     # inbound mail from other servers
+      - "465:465"   # submission, implicit TLS
+      - "587:587"   # submission, STARTTLS
+      - "993:993"   # IMAP, implicit TLS
+    networks:
+      - mail_net
+
+  snappymail:
+    image: djmaze/snappymail:latest
+    container_name: snappymail
+    restart: unless-stopped
+    profiles: ["webmail"]
+    volumes:
+      - ./snappymail_data:/var/lib/snappymail
+    networks:
+      - mail_net
+
+networks:
+  mail_net:
+    name: mail_net
+
+volumes:
+  stalwart_data:
+    name: stalwart_data

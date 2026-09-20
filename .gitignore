@@ -1,0 +1,18 @@
+# The primary configuration file holds the administrator password.
+# Only mailserver.conf.example belongs in git.
+mailserver.conf
+
+# Generated from mailserver.conf at setup time.
+compose/.env
+compose/Caddyfile
+
+# Generated mailbox passwords.
+mailbox-passwords.txt
+
+# Runtime state.
+compose/caddy_data/
+compose/caddy_config/
+compose/snappymail_data/
+plans/
+*.key
+*.pem

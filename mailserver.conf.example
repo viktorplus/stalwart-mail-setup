@@ -1,0 +1,58 @@
+# ============================================================================
+# Primary configuration file. Everything the setup needs is declared here.
+#
+#   cp mailserver.conf.example mailserver.conf
+#   edit mailserver.conf
+#   bin/setup.sh
+#
+# Re-running bin/setup.sh after an edit applies the difference; it never
+# rotates a password of a mailbox that already exists.
+#
+# This file contains the administrator password. It is listed in .gitignore
+# and must stay mode 600. Keep it on the server only.
+# ============================================================================
+
+
+# --- server ----------------------------------------------------------------
+
+# Public hostname of this mail server. MX records point at it, the TLS
+# certificate is issued for it, and mail clients connect to it.
+# It needs an A record and a matching PTR record before you start.
+hostname = mx.example.com
+
+# Address Let's Encrypt uses for certificate expiry notices.
+acme_email = admin@example.com
+
+# Password for the Stalwart administrator account (web panel at
+# https://<hostname>/ and the command line tools). Choose a long one:
+# the server rejects weak passwords.
+admin_password = change-this-to-a-long-unique-passphrase
+
+# Hostname for the optional SnappyMail webmail. It needs its own A record.
+# Leave empty to skip webmail entirely; mail clients still work.
+webmail_host = webmail.example.com
+
+
+# --- domains ---------------------------------------------------------------
+# One line per email domain this server accepts mail for.
+# The first one is the default domain used for server reports.
+
+domain = example.com
+domain = example.net
+
+
+# --- mailboxes -------------------------------------------------------------
+# One line per mailbox:
+#
+#   mailbox = <address>  [alias, alias, ...]
+#
+# The address is the IMAP/SMTP login. Aliases are extra addresses delivered
+# into the same mailbox; they are not separate logins and may live on any
+# domain listed above.
+#
+# A password is generated for every new mailbox and written to
+# mailbox-passwords.txt (mode 600). Existing mailboxes keep theirs.
+
+mailbox = info@example.com     postmaster@example.com, abuse@example.com
+mailbox = sales@example.com
+mailbox = info@example.net     postmaster@example.net, abuse@example.net

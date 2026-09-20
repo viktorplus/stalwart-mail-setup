@@ -1,0 +1,22 @@
+
+# Webmail. Appended to the generated Caddyfile only when webmail_host is set
+# in mailserver.conf.
+{{WEBMAIL_HOST}} {
+	encode zstd gzip
+
+	log {
+		output file /data/access.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+	}
+
+	reverse_proxy snappymail:8888
+}
