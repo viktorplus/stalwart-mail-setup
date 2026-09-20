@@ -29,8 +29,13 @@ jobs:
           for script in bin/*.sh tests/*.sh; do
             sh -n "$script" && echo "ok $script"
           done
+      # Pinned to an image rather than whatever the runner ships, so that a new
+      # shellcheck release cannot turn this red on its own, and so a local run
+      # gives the same verdict.
       - name: shellcheck
-        run: shellcheck --shell=sh bin/*.sh tests/*.sh
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
+            --shell=sh bin/*.sh tests/*.sh
       - name: Executable bits
         run: |
           for script in bin/*.sh bin/apply-config.py tests/integration.sh; do

@@ -42,10 +42,10 @@ DOMAIN=$(sed -n 's/^[[:space:]]*hostname[[:space:]]*=[[:space:]]*//p' "$CONF" \
 [ -n "$DOMAIN" ] || { echo "reimport-cert: hostname not set in $CONF" >&2; exit 1; }
 
 CRT=$(find "$CERTS" -type f -path "*/$DOMAIN/$DOMAIN.crt" 2>/dev/null | head -1)
-[ -n "$CRT" ] && [ -r "$CRT" ] || {
+if [ -z "$CRT" ] || [ ! -r "$CRT" ]; then
 	echo "reimport-cert: no certificate for $DOMAIN yet" >&2
 	exit 1
-}
+fi
 KEY=$(dirname "$CRT")/"$DOMAIN".key
 [ -r "$KEY" ] || { echo "reimport-cert: key file not found ($KEY)" >&2; exit 1; }
 

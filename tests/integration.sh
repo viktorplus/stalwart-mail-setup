@@ -55,7 +55,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Work on a copy, so a mailserver.conf in the checkout is never touched.
-cp -r "$ROOT/bin" "$ROOT/compose" "$ROOT/tests" "$WORK/"
+cp -R "$ROOT/bin" "$ROOT/compose" "$ROOT/tests" "$WORK/"
 cat > "$WORK/mailserver.conf" <<CONF
 hostname       = $HOSTNAME_UNDER_TEST
 acme_email     = admin@example.com
