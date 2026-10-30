@@ -250,7 +250,7 @@ def apply(conf):
         save_passwords(created)
 
     # Stored settings do not reach live sessions until they are reloaded.
-    cli("create", "Action/ReloadSettings")
+    cli("create", "Action/ReloadSettings", "--json", "{}")
     print("settings reloaded")
 
 
@@ -341,7 +341,7 @@ def allow_webmail(conf):
             "--field", "address=%s" % SNAPPYMAIL_IP,
             "--field", "reason=%s" % SNAPPYMAIL_REASON)
         print("allowip  %-32s created" % SNAPPYMAIL_IP)
-    cli("create", "Action/ReloadSettings")
+    cli("create", "Action/ReloadSettings", "--json", "{}")
     print("settings reloaded")
 
 

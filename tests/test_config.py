@@ -331,6 +331,16 @@ class TestRepositoryFiles(unittest.TestCase):
         self.assertIn("[Init]", lines)
         self.assertIn(r"datepattern = ^\[%%Y-%%m-%%d %%H:%%M:%%S\]", lines)
 
+    def test_documented_actions_carry_a_body(self):
+        names = ["README.md"] + [os.path.join("docs", name) for name
+                                 in sorted(os.listdir(os.path.join(ROOT, "docs")))]
+        actions = [line for name in names
+                   for line in self.text(name).splitlines()
+                   if "create Action/" in line]
+        self.assertTrue(actions)
+        for line in actions:
+            self.assertTrue(line.rstrip().endswith("--json '{}'"), line)
+
     def test_generated_files_are_ignored_by_git(self):
         ignored = self.text(".gitignore").splitlines()
         self.assertIn("compose/fail2ban/jail.d/snappymail.local", ignored)
@@ -490,6 +500,27 @@ class TestWebmailCommand(WebmailCase):
         self.assertGreater(sum(sleeps), 0)
 
 
+# The current stalwart-cli refuses `create Action/...` without a body.
+RELOAD = ("create", "Action/ReloadSettings", "--json", "{}")
+
+
+class TestApplyReload(ConfigCase):
+
+    def test_apply_ends_with_a_reload_that_carries_a_body(self):
+        calls = []
+        replies = {"Domain": "Id  Name\n1  example.com\n2  example.net\n",
+                   "Account": "Id  Name\n5  info@example.com\n"
+                              "6  sales@example.com\n"}
+
+        def fake_cli(*args):
+            calls.append(args)
+            return replies[args[1]] if args[0] == "query" else ""
+
+        with mock.patch.object(apply_config, "cli", fake_cli),                 contextlib.redirect_stdout(io.StringIO()):
+            apply_config.apply(self.read(VALID))
+        self.assertEqual(calls[-1], RELOAD)
+
+
 class TestAllowWebmail(ConfigCase):
 
     HEADER = "Id  IP Address(es)  Reason\n"
@@ -514,14 +545,14 @@ class TestAllowWebmail(ConfigCase):
         self.assertIn("address=172.16.89.10", create[0])
         self.assertIn("reason=SnappyMail webmail; brute force is banned by "
                       "fail2ban on the host", create[0])
-        self.assertEqual(calls[-1], ("create", "Action/ReloadSettings"))
+        self.assertEqual(calls[-1], RELOAD)
         self.assertRegex(out, r"allowip  172\.16\.89\.10 +created")
 
     def test_existing_exception_is_not_duplicated(self):
         calls, out = self.run_allow(
             self.HEADER + "9  172.16.89.10  SnappyMail webmail\n")
         self.assertFalse([c for c in calls if c[:2] == ("create", "AllowedIp")])
-        self.assertEqual(calls[-1], ("create", "Action/ReloadSettings"))
+        self.assertEqual(calls[-1], RELOAD)
         self.assertRegex(out, r"allowip  172\.16\.89\.10 +exists")
 
 

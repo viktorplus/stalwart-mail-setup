@@ -11,10 +11,10 @@ Tell Stalwart to read the forwarded address, and clear the ban:
 
 ```sh
 bin/sw-cli.sh update Http singleton --field useXForwarded=true
-bin/sw-cli.sh create Action/ReloadSettings
+bin/sw-cli.sh create Action/ReloadSettings --json '{}'
 bin/sw-cli.sh query BlockedIp
 bin/sw-cli.sh delete BlockedIp --ids <id>
-bin/sw-cli.sh create Action/ReloadBlockedIps
+bin/sw-cli.sh create Action/ReloadBlockedIps --json '{}'
 ```
 
 `ReloadBlockedIps` matters: removing the row is not enough, the running server
@@ -32,7 +32,7 @@ Confirm and clear it:
 docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' snappymail
 bin/sw-cli.sh query BlockedIp          # look for that address
 bin/sw-cli.sh delete BlockedIp --ids <id>
-bin/sw-cli.sh create Action/ReloadBlockedIps
+bin/sw-cli.sh create Action/ReloadBlockedIps --json '{}'
 ```
 
 **On a current install this does not recur.** `sudo bin/setup.sh` with a
@@ -78,7 +78,7 @@ when it finds the old network) and let `bin/setup.sh` do all of it.
 
    ```sh
    bin/sw-cli.sh create AllowedIp --field address=<snappymail ip>
-   bin/sw-cli.sh create Action/ReloadSettings
+   bin/sw-cli.sh create Action/ReloadSettings --json '{}'
    ```
 
    If the container is ever recreated with a different address, add the new
@@ -108,7 +108,7 @@ Writes land in the database while the running server keeps the previous
 settings. After changing anything outside `bin/apply-config.py`:
 
 ```sh
-bin/sw-cli.sh create Action/ReloadSettings
+bin/sw-cli.sh create Action/ReloadSettings --json '{}'
 ```
 
 The symptom is indistinguishable from a wrong value, which is what makes it
