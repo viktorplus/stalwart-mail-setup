@@ -9,8 +9,9 @@ All steps are idempotent:
     apply-config.py webmail        set the SnappyMail admin key and client IP
     apply-config.py allow-webmail  exempt SnappyMail from Stalwart's IP ban
 
-`render` runs before the stack starts, `apply` after it is up. bin/setup.sh
-calls both in order; run either on its own after editing mailserver.conf.
+`render` runs before the stack starts, the others after it is up.
+bin/setup.sh calls them in the order render, apply, webmail, allow-webmail;
+run render or apply on its own after editing mailserver.conf.
 
 `apply` never rotates the password of a mailbox that already exists. New
 mailboxes get a generated password, written only to mailbox-passwords.txt
@@ -301,7 +302,29 @@ def admin_key():
     if not os.path.exists(ADMIN_KEY_FILE):
         write_private(ADMIN_KEY_FILE, secrets.token_hex(12) + "\n")
     with open(ADMIN_KEY_FILE, encoding="utf-8") as handle:
-        return handle.read().strip()
+        key = handle.read().strip()
+    if not key:
+        die("snappymail-admin-key.txt is empty. Put the key from [admin_panel] "
+            "in %s into it, or delete it to generate a new key."
+            % SNAPPYMAIL_INI)
+    return key
+
+
+def ensure_auth_log():
+    """Create SnappyMail's auth log, owned like application.ini.
+
+    fail2ban refuses a jail whose log file does not exist, and SnappyMail
+    writes the file only on the first failed sign-in.
+    """
+    if os.path.exists(SNAPPYMAIL_AUTH_LOG):
+        return
+    owner = os.stat(SNAPPYMAIL_INI)
+    logs = os.path.dirname(SNAPPYMAIL_AUTH_LOG)
+    os.makedirs(logs, mode=0o700, exist_ok=True)
+    write_private(SNAPPYMAIL_AUTH_LOG, "")
+    if hasattr(os, "chown"):
+        for path in (logs, SNAPPYMAIL_AUTH_LOG):
+            os.chown(path, owner.st_uid, owner.st_gid)
 
 
 def webmail(conf):
@@ -327,6 +350,7 @@ def webmail(conf):
     with open(SNAPPYMAIL_INI, encoding="utf-8") as handle:
         text = patch_snappymail_ini(handle.read(), key)
     write_private(SNAPPYMAIL_INI, text)
+    ensure_auth_log()
     print("webmail  admin panel key %s (snappymail-admin-key.txt)"
           % ("generated" if generated else "kept"))
     print("webmail  client IP taken from the proxy")

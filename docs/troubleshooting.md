@@ -99,8 +99,12 @@ SnappyMail's admin panel answers on `/?admin` by default and draws its own
 guessing traffic. The installer sets `[admin_panel] key` in `application.ini`
 to a random key and keeps it in `snappymail-admin-key.txt`; the panel then
 lives at `https://<webmail_host>/?<key>`, and `/?admin` is an ordinary sign-in
-page. Re-running `bin/setup.sh` keeps the key. If the file is lost, the
-key is still in `application.ini` under `[admin_panel]`.
+page. Re-running `bin/setup.sh` keeps the key. If the file is lost, the next
+`bin/setup.sh` generates a new key and replaces the old one in
+`application.ini`. To keep the old key instead, copy it from `key = "..."`
+under `[admin_panel]` in
+`compose/snappymail_data/_data_/_default_/configs/application.ini` into
+`snappymail-admin-key.txt` (mode 600) before re-running.
 
 ## A setting was saved but nothing changed
 

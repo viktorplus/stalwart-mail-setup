@@ -406,7 +406,9 @@ class WebmailCase(ConfigCase):
         super().setUp()
         for name, value in (
                 ("ADMIN_KEY_FILE", os.path.join(self.tmp, "admin-key.txt")),
-                ("SNAPPYMAIL_INI", os.path.join(self.tmp, "application.ini"))):
+                ("SNAPPYMAIL_INI", os.path.join(self.tmp, "application.ini")),
+                ("SNAPPYMAIL_AUTH_LOG",
+                 os.path.join(self.tmp, "logs", "auth.log"))):
             self.addCleanup(setattr, apply_config, name,
                             getattr(apply_config, name))
             setattr(apply_config, name, value)
@@ -473,6 +475,31 @@ class TestWebmailCommand(WebmailCase):
         ok, out, _ = self.run_webmail()
         self.assertIn("webmail  admin panel key kept", out)
         self.assertEqual(self.read_ini(), ini)
+
+    def test_blank_key_file_is_refused(self):
+        self.write_ini(SHIPPED_INI)
+        with open(apply_config.ADMIN_KEY_FILE, "w", encoding="utf-8") as handle:
+            handle.write("  \n")
+        ok, _, err = self.run_webmail()
+        self.assertIsNone(ok)
+        self.assertIn("snappymail-admin-key.txt", err)
+        self.assertIn("is empty", err)
+        self.assertEqual(self.read_ini(), SHIPPED_INI)
+
+    def test_creates_the_auth_log_fail2ban_reads(self):
+        # fail2ban refuses a jail whose log file does not exist, and
+        # SnappyMail writes it only on the first failed sign-in.
+        self.write_ini(SHIPPED_INI)
+        ok, _, _ = self.run_webmail()
+        self.assertTrue(ok)
+        self.assertTrue(os.path.isfile(apply_config.SNAPPYMAIL_AUTH_LOG))
+
+        with open(apply_config.SNAPPYMAIL_AUTH_LOG, "a",
+                  encoding="utf-8") as handle:
+            handle.write("[2026-10-30 12:00:00] Auth failed: ip=203.0.113.7\n")
+        self.run_webmail()
+        with open(apply_config.SNAPPYMAIL_AUTH_LOG, encoding="utf-8") as handle:
+            self.assertIn("ip=203.0.113.7", handle.read())
 
     def test_unexpected_ini_is_left_alone(self):
         broken = SHIPPED_INI.replace('key = "admin"\n', "")

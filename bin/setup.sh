@@ -46,7 +46,7 @@ if subnet=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}
 		echo "setup: the mail_net network uses the subnet ${subnet% }, not 172.16.89.0/24." >&2
 		echo "       It has to be recreated once. This stops the stack briefly; the data" >&2
 		echo "       in the stalwart_data volume and in compose/ is kept. Run:" >&2
-		echo "docker compose -f $COMPOSE --profile webmail down && sudo $ROOT/bin/setup.sh" >&2
+		echo "sudo docker compose -f '$COMPOSE' --profile webmail down && sudo '$ROOT/bin/setup.sh'" >&2
 		exit 1
 		;;
 	esac
@@ -86,6 +86,7 @@ if [ "$WEBMAIL" = 1 ]; then
 			echo "       Install fail2ban with your package manager, then re-run bin/setup.sh." >&2
 			exit 1
 		}
+		apt-get update
 		apt-get install -y fail2ban
 	fi
 	install -m 644 "$ROOT/compose/fail2ban/filter.d/snappymail.conf" /etc/fail2ban/filter.d/snappymail.conf

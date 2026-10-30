@@ -217,6 +217,16 @@ docker run --rm -v "$WORK:/work" python:3-alpine cat \
 expect "key = \"$KEY\"" "$WORK/application.ini.1" "admin panel key in application.ini"
 expect "http_client_ip_check_proxy = On" "$WORK/application.ini.1" \
 	"proxy client IP in application.ini"
+# fail2ban refuses the jail while its log file is missing.
+docker run --rm -v "$WORK:/work" -w /work/compose/snappymail_data/_data_/_default_ \
+	python:3-alpine stat -c '%u:%g' configs/application.ini logs/auth.log \
+	> "$WORK/owners.out" 2>&1 || { cat "$WORK/owners.out"; fail "auth.log not created"; }
+[ "$(sort -u "$WORK/owners.out" | wc -l)" -eq 1 ] \
+	|| { cat "$WORK/owners.out"; fail "auth.log not owned like application.ini"; }
+docker exec -u www-data snappymail test -w \
+	/var/lib/snappymail/_data_/_default_/logs/auth.log \
+	|| fail "auth.log not writable by SnappyMail"
+echo "   ok: auth.log exists, owned like application.ini, writable by SnappyMail"
 webmail | tee "$WORK/webmail2.out"
 expect "admin panel key kept" "$WORK/webmail2.out" "admin key kept on re-run"
 docker run --rm -v "$WORK:/work" python:3-alpine cat \
