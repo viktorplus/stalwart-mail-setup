@@ -13,12 +13,94 @@ Tell Stalwart to read the forwarded address, and clear the ban:
 bin/sw-cli.sh update Http singleton --field useXForwarded=true
 bin/sw-cli.sh create Action/ReloadSettings
 bin/sw-cli.sh query BlockedIp
-bin/sw-cli.sh delete BlockedIp <id>
+bin/sw-cli.sh delete BlockedIp --ids <id>
 bin/sw-cli.sh create Action/ReloadBlockedIps
 ```
 
 `ReloadBlockedIps` matters: removing the row is not enough, the running server
 keeps its in-memory ban list until it is reloaded.
+
+## Webmail says `Can't connect to host "ssl://stalwart:993"`
+
+The same ban, one layer down. SnappyMail logs every user in over IMAP from its
+own container address, so a password-guessing run through the webmail gets the
+webmail container banned, and nobody can sign in.
+
+Confirm and clear it:
+
+```sh
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' snappymail
+bin/sw-cli.sh query BlockedIp          # look for that address
+bin/sw-cli.sh delete BlockedIp --ids <id>
+bin/sw-cli.sh create Action/ReloadBlockedIps
+```
+
+**On a current install this does not recur.** `sudo bin/setup.sh` with a
+`webmail_host` sets the protection up itself: Caddy strips `Client-IP`,
+SnappyMail logs the real client address, fail2ban on the host bans the
+attacker after 5 failed sign-ins in 10 minutes, and Stalwart exempts the
+webmail container, which has the fixed address `172.16.89.10`. Check it with
+`fail2ban-client status snappymail` and
+`bin/sw-cli.sh query AllowedIp`.
+
+The steps below are for an install made before this existed, and for the case
+where the container's address has changed. They go together: the last step
+alone removes the only brake on password guessing. The simplest route on an
+older install is to recreate the stack once (the installer prints the command
+when it finds the old network) and let `bin/setup.sh` do all of it.
+
+1. **Strip `Client-IP` in Caddy.** SnappyMail trusts that header ahead of
+   `X-Forwarded-For`, and any client can send it. In the webmail block:
+
+   ```
+   reverse_proxy snappymail:8888 {
+   	header_up -Client-IP
+   }
+   ```
+
+   Caddy sets `X-Forwarded-For` itself and does not pass a forged one through.
+
+2. **Log the real client address.** In SnappyMail's `application.ini`, under
+   `[labs]`: `http_client_ip_check_proxy = On`. Failed sign-ins in
+   `_data_/_default_/logs/auth.log` then read `ip=<client>` instead of `ip=`.
+
+3. **Ban from that log with fail2ban on the host.** Copy
+   `compose/fail2ban/filter.d/snappymail.conf` to `/etc/fail2ban/filter.d/`
+   and the generated `compose/fail2ban/jail.d/snappymail.local` (written by
+   `bin/apply-config.py render`) to `/etc/fail2ban/jail.d/`, then
+   `fail2ban-client reload`. The jail's `logpath` is that `auth.log`,
+   `logtimezone` is `UTC` (the container logs in UTC), and the action is
+   `iptables-allports[name=snappymail, chain=DOCKER-USER, protocol=all]`.
+   The chain matters: traffic to published container ports is forwarded, so a
+   ban in `INPUT` never applies to it.
+
+4. **Exempt the webmail container in Stalwart:**
+
+   ```sh
+   bin/sw-cli.sh create AllowedIp --field address=<snappymail ip>
+   bin/sw-cli.sh create Action/ReloadSettings
+   ```
+
+   If the container is ever recreated with a different address, add the new
+   one. `bin/apply-config.py allow-webmail` does both commands for
+   `172.16.89.10` and does not duplicate an existing entry.
+
+Check that the chain works end to end: one failed sign-in through the webmail
+should show up in `auth.log` with your address, and in
+`fail2ban-client status snappymail`. A probe from the server itself is logged
+as the Docker gateway and skipped by fail2ban's `ignoreself` rule.
+
+The installer does not undo any of this if you later remove `webmail_host`:
+the fail2ban files and the `AllowedIp` entry stay until you delete them.
+
+## The webmail admin panel
+
+SnappyMail's admin panel answers on `/?admin` by default and draws its own
+guessing traffic. The installer sets `[admin_panel] key` in `application.ini`
+to a random key and keeps it in `snappymail-admin-key.txt`; the panel then
+lives at `https://<webmail_host>/?<key>`, and `/?admin` is an ordinary sign-in
+page. Re-running `bin/setup.sh` keeps the key. If the file is lost, the
+key is still in `application.ini` under `[admin_panel]`.
 
 ## A setting was saved but nothing changed
 

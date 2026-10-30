@@ -11,7 +11,8 @@ What you get:
 
 - **Stalwart** for SMTP and IMAP, with DKIM keys generated per domain.
 - **Caddy** in front, obtaining and renewing the Let's Encrypt certificate.
-- **SnappyMail** webmail, optional.
+- **SnappyMail** webmail, optional, protected against password guessing by
+  fail2ban on the host.
 - Ready-to-publish DNS records (MX, SPF, DKIM, DMARC, MTA-STS, autoconfig),
   printed from the live configuration rather than typed by hand.
 - Connection settings for Thunderbird, Outlook, iOS, Android and application
@@ -70,6 +71,26 @@ sudo bin/setup.sh
 It renders the Caddy and Compose configuration, starts the stack, waits for
 Stalwart to come up, creates the domains and mailboxes, and imports the TLS
 certificate once Caddy has issued one.
+
+With a `webmail_host` it also protects the webmail against password guessing,
+and needs root for that. Caddy stops forwarding the client-supplied `Client-IP`
+header; SnappyMail is set to log the real client address; **fail2ban is
+installed on the host** with `apt-get` if it is missing (on a host without
+`apt-get` the setup stops and asks you to install it), and bans an address
+after 5 failed sign-ins in 10 minutes, for an hour at first and longer for
+repeat offenders; and Stalwart is told not to ban the webmail container
+itself, which has the fixed address `172.16.89.10` on `mail_net`. The
+exemption is created only after fail2ban's `snappymail` jail is confirmed
+active. The setup also sets a random key for SnappyMail's admin panel, stored
+in `snappymail-admin-key.txt` (mode 600, never printed). Open the panel at
+`https://<webmail_host>/?<key>`; `/?admin` is an ordinary sign-in page. Without
+`webmail_host` none of this happens.
+
+**Existing installs.** The `mail_net` network must use the subnet
+`172.16.89.0/24`. If it exists with another one, `bin/setup.sh` stops before
+changing anything and prints a single command that recreates the stack. The
+stack is down for a short while; the mail data and the Caddy certificates are
+kept.
 
 A password is generated for every new mailbox and written to
 `mailbox-passwords.txt` (mode 600). It is never printed to the terminal.
@@ -137,13 +158,14 @@ Skipping this means the certificate served on SMTP and IMAP quietly expires.
 | Path | Purpose |
 |---|---|
 | `mailserver.conf` | the one file you edit; holds the admin password, so it is gitignored |
-| `bin/setup.sh` | render, start, apply, import certificate |
+| `bin/setup.sh` | render, start, apply, webmail protection, import certificate |
 | `bin/apply-config.py` | turns `mailserver.conf` into domains and mailboxes |
 | `bin/show-dns.sh` | prints the DNS records for every domain |
 | `bin/verify.sh` | IMAP sign-in and a live send/receive test |
 | `bin/reimport-cert.sh` | copies the renewed certificate into Stalwart |
 | `bin/sw-cli.sh` | direct `stalwart-cli` access for anything not covered above |
-| `compose/` | the Docker stack and the Caddy templates |
+| `snappymail-admin-key.txt` | key to the webmail admin panel, written by `bin/setup.sh`; gitignored, mode 600 |
+| `compose/` | the Docker stack, the Caddy templates and the fail2ban filter and jail |
 | `docs/` | DNS, mail clients, TLS, troubleshooting |
 | `tests/` | unit tests and an end-to-end run against a throwaway server |
 
