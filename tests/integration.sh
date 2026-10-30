@@ -191,14 +191,17 @@ mkdir -p "$WORK/compose/snappymail_data"
 docker run -d --name snappymail --network mail_net --ip "$SNAPPYMAIL_IP" \
 	-v "$WORK/compose/snappymail_data:/var/lib/snappymail" \
 	"$SNAPPYMAIL_IMAGE" >/dev/null
-INI="$WORK/compose/snappymail_data/_data_/_default_/configs/application.ini"
+# SnappyMail's data directory belongs to the container user, so every look
+# inside it goes through a container rather than the unprivileged host user.
+INI=/var/lib/snappymail/_data_/_default_/configs/application.ini
 waited=0
 while [ "$waited" -lt 90 ]; do
-	[ -f "$INI" ] && break
+	docker exec snappymail test -f "$INI" && break
 	sleep 2
 	waited=$((waited + 2))
 done
-[ -f "$INI" ] || { docker logs snappymail | tail -20; fail "application.ini not created in ${waited}s"; }
+docker exec snappymail test -f "$INI" \
+	|| { docker logs snappymail | tail -20; fail "application.ini not created in ${waited}s"; }
 echo "   ok: application.ini exists after ${waited}s"
 # The container owns the file, so the command runs as root, as setup.sh does.
 webmail() {
@@ -208,8 +211,9 @@ webmail() {
 webmail | tee "$WORK/webmail1.out"
 expect "admin panel key generated" "$WORK/webmail1.out" "admin key generated"
 expect "client IP taken from the proxy" "$WORK/webmail1.out" "proxy client IP enabled"
-[ -s "$WORK/snappymail-admin-key.txt" ] || fail "admin key file not written"
-KEY=$(cat "$WORK/snappymail-admin-key.txt")
+KEY=$(docker run --rm -v "$WORK:/work" python:3-alpine cat /work/snappymail-admin-key.txt) \
+	|| fail "admin key file not written"
+[ -n "$KEY" ] || fail "admin key file is empty"
 grep -q -- "$KEY" "$WORK/webmail1.out" && fail "the admin key was printed"
 docker run --rm -v "$WORK:/work" python:3-alpine cat \
 	/work/compose/snappymail_data/_data_/_default_/configs/application.ini \
