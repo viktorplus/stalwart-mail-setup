@@ -15,8 +15,10 @@ import io
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -203,10 +205,16 @@ class TestRender(ConfigCase):
     def setUp(self):
         super().setUp()
         self.compose = os.path.join(self.tmp, "compose")
-        shutil.copytree(os.path.join(ROOT, "compose"), self.compose)
-        self._saved_compose = apply_config.COMPOSE
-        apply_config.COMPOSE = self.compose
-        self.addCleanup(setattr, apply_config, "COMPOSE", self._saved_compose)
+        # Generated files from a local run must not leak into the copy.
+        shutil.copytree(os.path.join(ROOT, "compose"), self.compose,
+                        ignore=shutil.ignore_patterns(
+                            "snappymail.local", "*_data", "*_config"))
+        for name, value in (
+                ("COMPOSE", self.compose),
+                ("FAIL2BAN_DIR", os.path.join(self.compose, "fail2ban"))):
+            self.addCleanup(setattr, apply_config, name,
+                            getattr(apply_config, name, None))
+            setattr(apply_config, name, value)
 
     def render(self, text):
         conf = self.read(text)
@@ -253,6 +261,280 @@ class TestRender(ConfigCase):
     def test_no_placeholder_survives(self):
         caddyfile, _ = self.render(VALID)
         self.assertNotIn("{{", caddyfile)
+
+    def test_webmail_proxy_drops_client_ip_header(self):
+        caddyfile, _ = self.render(VALID)
+        self.assertIn("reverse_proxy snappymail:8888 {", caddyfile)
+        self.assertIn("header_up -Client-IP", caddyfile)
+
+    def jail(self):
+        return os.path.join(self.compose, "fail2ban", "jail.d",
+                            "snappymail.local")
+
+    def test_jail_written_when_webmail_configured(self):
+        conf = self.read(VALID)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            apply_config.render(conf)
+        self.assertIn("wrote compose/fail2ban/jail.d/snappymail.local",
+                      out.getvalue())
+        with open(self.jail(), encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle]
+        expected = [
+            "filter = snappymail",
+            "logpath = %s" % apply_config.SNAPPYMAIL_AUTH_LOG,
+            "logtimezone = UTC",
+            "maxretry = 5",
+            "findtime = 10m",
+            "bantime = 1h",
+            "bantime.increment = true",
+            "bantime.maxtime = 1w",
+            "action = iptables-allports[name=snappymail, chain=DOCKER-USER, "
+            "protocol=all]",
+        ]
+        for line in expected:
+            self.assertIn(line, lines)
+        self.assertTrue(os.path.isabs(apply_config.SNAPPYMAIL_AUTH_LOG))
+        self.assertTrue(apply_config.SNAPPYMAIL_AUTH_LOG.endswith(
+            os.path.join("_default_", "logs", "auth.log")))
+
+    def test_jail_not_written_without_webmail(self):
+        self.render(VALID.replace("webmail_host   = webmail.example.com",
+                                  "webmail_host   ="))
+        self.assertFalse(os.path.exists(self.jail()))
+
+
+class TestRepositoryFiles(unittest.TestCase):
+    """Committed files that must agree with the constants in the code."""
+
+    def text(self, *parts):
+        with open(os.path.join(ROOT, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_constants(self):
+        self.assertEqual(apply_config.MAIL_SUBNET, "172.16.89.0/24")
+        self.assertEqual(apply_config.MAIL_DYNAMIC_RANGE, "172.16.89.128/25")
+        self.assertEqual(apply_config.SNAPPYMAIL_IP, "172.16.89.10")
+
+    def test_compose_pins_the_addresses(self):
+        compose = self.text("compose", "docker-compose.yml")
+        self.assertIn("subnet: %s" % apply_config.MAIL_SUBNET, compose)
+        self.assertIn("ip_range: %s" % apply_config.MAIL_DYNAMIC_RANGE, compose)
+        self.assertIn("ipv4_address: %s" % apply_config.SNAPPYMAIL_IP, compose)
+
+    def test_fail2ban_filter(self):
+        lines = [line.strip() for line in
+                 self.text("compose", "fail2ban", "filter.d",
+                           "snappymail.conf").splitlines()]
+        self.assertIn(r"failregex = ^\s*(?:Admin )?Auth failed: ip=<HOST> user=",
+                      lines)
+        self.assertIn("[Init]", lines)
+        self.assertIn(r"datepattern = ^\[%%Y-%%m-%%d %%H:%%M:%%S\]", lines)
+
+    def test_generated_files_are_ignored_by_git(self):
+        ignored = self.text(".gitignore").splitlines()
+        self.assertIn("compose/fail2ban/jail.d/snappymail.local", ignored)
+        self.assertIn("snappymail-admin-key.txt", ignored)
+
+
+SHIPPED_INI = """\
+[webmail]
+title = "SnappyMail Webmail"
+
+[admin_panel]
+host = ""
+key = "admin"
+allow_update = Off
+
+[labs]
+cache_system_data = On
+http_client_ip_check_proxy = Off
+use_local_proxy_for_external_images = On
+"""
+
+
+class TestPatchIni(unittest.TestCase):
+
+    def test_sets_both_settings(self):
+        out = apply_config.patch_snappymail_ini(SHIPPED_INI, "0123abcd")
+        expected = (SHIPPED_INI
+                    .replace('key = "admin"', 'key = "0123abcd"')
+                    .replace("http_client_ip_check_proxy = Off",
+                             "http_client_ip_check_proxy = On"))
+        self.assertEqual(out, expected)
+
+    def test_is_idempotent(self):
+        once = apply_config.patch_snappymail_ini(SHIPPED_INI, "0123abcd")
+        self.assertEqual(apply_config.patch_snappymail_ini(once, "0123abcd"),
+                         once)
+
+    def test_key_outside_admin_panel_is_not_touched(self):
+        text = SHIPPED_INI.replace("[webmail]\n", "[webmail]\nkey = \"x\"\n")
+        out = apply_config.patch_snappymail_ini(text, "0123abcd")
+        self.assertIn('[webmail]\nkey = "x"\n', out)
+
+    def assertDies(self, text):
+        with self.assertRaises(SystemExit), \
+                contextlib.redirect_stderr(io.StringIO()):
+            apply_config.patch_snappymail_ini(text, "0123abcd")
+
+    def test_missing_admin_key_line_is_an_error(self):
+        self.assertDies(SHIPPED_INI.replace('key = "admin"\n', ""))
+
+    def test_missing_proxy_line_is_an_error(self):
+        self.assertDies(SHIPPED_INI.replace(
+            "http_client_ip_check_proxy = Off\n", ""))
+
+    def test_setting_in_the_wrong_section_is_an_error(self):
+        self.assertDies(SHIPPED_INI.replace("[labs]\n", "[other]\n"))
+
+
+class WebmailCase(ConfigCase):
+    """Points the key file and the SnappyMail data directory at a temp dir."""
+
+    def setUp(self):
+        super().setUp()
+        for name, value in (
+                ("ADMIN_KEY_FILE", os.path.join(self.tmp, "admin-key.txt")),
+                ("SNAPPYMAIL_INI", os.path.join(self.tmp, "application.ini"))):
+            self.addCleanup(setattr, apply_config, name,
+                            getattr(apply_config, name))
+            setattr(apply_config, name, value)
+
+
+class TestAdminKey(WebmailCase):
+
+    def test_created_once_and_kept(self):
+        key = apply_config.admin_key()
+        self.assertRegex(key, r"^[0-9a-f]{24}$")
+        with open(apply_config.ADMIN_KEY_FILE, encoding="utf-8") as handle:
+            self.assertEqual(handle.read().strip(), key)
+        self.assertEqual(apply_config.admin_key(), key)
+
+    def test_key_file_is_not_world_readable(self):
+        if os.name == "nt":
+            self.skipTest("POSIX permissions only")
+        apply_config.admin_key()
+        mode = os.stat(apply_config.ADMIN_KEY_FILE).st_mode
+        self.assertEqual(stat.S_IMODE(mode), 0o600)
+
+
+class TestWebmailCommand(WebmailCase):
+
+    def run_webmail(self, text=VALID):
+        conf = self.read(text)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                apply_config.webmail(conf)
+            except SystemExit:
+                return None, out.getvalue(), err.getvalue()
+        return True, out.getvalue(), err.getvalue()
+
+    def write_ini(self, text):
+        with open(apply_config.SNAPPYMAIL_INI, "w", encoding="utf-8",
+                  newline="\n") as handle:
+            handle.write(text)
+
+    def read_ini(self):
+        with open(apply_config.SNAPPYMAIL_INI, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_requires_webmail_host(self):
+        ok, _, err = self.run_webmail(
+            VALID.replace("webmail_host   = webmail.example.com",
+                          "webmail_host   ="))
+        self.assertIsNone(ok)
+        self.assertIn("webmail_host", err)
+
+    def test_patches_the_ini_and_never_prints_the_key(self):
+        self.write_ini(SHIPPED_INI)
+        ok, out, err = self.run_webmail()
+        self.assertTrue(ok)
+        key = apply_config.admin_key()
+        ini = self.read_ini()
+        self.assertIn('key = "%s"' % key, ini)
+        self.assertIn("http_client_ip_check_proxy = On", ini)
+        self.assertNotIn(key, out + err)
+        self.assertIn("webmail  admin panel key generated "
+                      "(snappymail-admin-key.txt)", out)
+        self.assertIn("webmail  client IP taken from the proxy", out)
+
+        ok, out, _ = self.run_webmail()
+        self.assertIn("webmail  admin panel key kept", out)
+        self.assertEqual(self.read_ini(), ini)
+
+    def test_unexpected_ini_is_left_alone(self):
+        broken = SHIPPED_INI.replace('key = "admin"\n', "")
+        self.write_ini(broken)
+        ok, _, _ = self.run_webmail()
+        self.assertIsNone(ok)
+        self.assertEqual(self.read_ini(), broken)
+
+    def test_missing_ini_triggers_snappymail_then_gives_up(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        sleeps = []
+        with mock.patch.object(apply_config.subprocess, "run", fake_run), \
+                mock.patch.object(apply_config.time, "sleep", sleeps.append):
+            ok, _, err = self.run_webmail()
+        self.assertIsNone(ok)
+        self.assertIn("application.ini", err)
+        self.assertTrue(any(args[:3] == ["docker", "exec", "snappymail"]
+                            for args in calls))
+        self.assertLessEqual(sum(sleeps), 60)
+        self.assertGreater(sum(sleeps), 0)
+
+
+class TestAllowWebmail(ConfigCase):
+
+    HEADER = "Id  IP Address(es)  Reason\n"
+
+    def run_allow(self, query_output):
+        calls = []
+
+        def fake_cli(*args):
+            calls.append(args)
+            return query_output if args[:1] == ("query",) else ""
+
+        out = io.StringIO()
+        with mock.patch.object(apply_config, "cli", fake_cli), \
+                contextlib.redirect_stdout(out):
+            apply_config.allow_webmail(self.read(VALID))
+        return calls, out.getvalue()
+
+    def test_creates_the_exception_once(self):
+        calls, out = self.run_allow(self.HEADER + "7  10.0.0.1  other\n")
+        create = [c for c in calls if c[:2] == ("create", "AllowedIp")]
+        self.assertEqual(len(create), 1)
+        self.assertIn("address=172.16.89.10", create[0])
+        self.assertIn("reason=SnappyMail webmail; brute force is banned by "
+                      "fail2ban on the host", create[0])
+        self.assertEqual(calls[-1], ("create", "Action/ReloadSettings"))
+        self.assertRegex(out, r"allowip  172\.16\.89\.10 +created")
+
+    def test_existing_exception_is_not_duplicated(self):
+        calls, out = self.run_allow(
+            self.HEADER + "9  172.16.89.10  SnappyMail webmail\n")
+        self.assertFalse([c for c in calls if c[:2] == ("create", "AllowedIp")])
+        self.assertEqual(calls[-1], ("create", "Action/ReloadSettings"))
+        self.assertRegex(out, r"allowip  172\.16\.89\.10 +exists")
+
+
+class TestUsage(unittest.TestCase):
+
+    def test_usage_lists_every_subcommand(self):
+        err = io.StringIO()
+        with mock.patch.object(apply_config.sys, "argv", ["apply-config.py"]), \
+                contextlib.redirect_stderr(err), \
+                self.assertRaises(SystemExit):
+            apply_config.main()
+        self.assertIn("apply-config.py render|apply|webmail|allow-webmail",
+                      err.getvalue())
 
 
 if __name__ == "__main__":

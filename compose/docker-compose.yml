@@ -54,11 +54,19 @@ services:
     volumes:
       - ./snappymail_data:/var/lib/snappymail
     networks:
-      - mail_net
+      # A fixed address, outside the dynamic range below: Stalwart exempts
+      # it from its automatic ban (bin/apply-config.py allow-webmail).
+      mail_net:
+        ipv4_address: 172.16.89.10
 
 networks:
   mail_net:
     name: mail_net
+    # Must match MAIL_SUBNET and MAIL_DYNAMIC_RANGE in bin/apply-config.py.
+    ipam:
+      config:
+        - subnet: 172.16.89.0/24
+          ip_range: 172.16.89.128/25
 
 volumes:
   stalwart_data:

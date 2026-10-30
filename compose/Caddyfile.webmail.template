@@ -18,5 +18,10 @@
 		X-Frame-Options SAMEORIGIN
 	}
 
-	reverse_proxy snappymail:8888
+	# SnappyMail takes the client address from Client-IP before
+	# X-Forwarded-For. Drop it so a client cannot forge the address that
+	# lands in auth.log; X-Forwarded-For is set by Caddy itself.
+	reverse_proxy snappymail:8888 {
+		header_up -Client-IP
+	}
 }

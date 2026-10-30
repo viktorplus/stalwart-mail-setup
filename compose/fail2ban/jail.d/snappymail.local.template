@@ -1,0 +1,22 @@
+# Generated into compose/fail2ban/jail.d/snappymail.local by
+# bin/apply-config.py render and copied to /etc/fail2ban/jail.d/ by
+# bin/setup.sh. Edit the template, not the generated file.
+#
+# Bans an address on every port after 5 failed webmail logins in 10 minutes.
+# The ban starts at 1 hour and grows with each repeat, up to 1 week. The rule
+# goes into DOCKER-USER because published container ports bypass INPUT.
+
+[snappymail]
+enabled = true
+# A plain log file, whatever backend the distribution sets as default.
+backend = auto
+filter = snappymail
+logpath = {{AUTH_LOG}}
+# SnappyMail writes its log times in UTC.
+logtimezone = UTC
+maxretry = 5
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+bantime.maxtime = 1w
+action = iptables-allports[name=snappymail, chain=DOCKER-USER, protocol=all]

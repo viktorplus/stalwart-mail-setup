@@ -5,9 +5,13 @@ mailserver.conf
 # Generated from mailserver.conf at setup time.
 compose/.env
 compose/Caddyfile
+compose/fail2ban/jail.d/snappymail.local
 
 # Generated mailbox passwords.
 mailbox-passwords.txt
+
+# Generated SnappyMail admin panel key.
+snappymail-admin-key.txt
 
 # Runtime state.
 compose/caddy_data/

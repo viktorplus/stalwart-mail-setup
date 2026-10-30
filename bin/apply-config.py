@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Turn mailserver.conf into a running configuration.
 
-Two steps, both idempotent:
+All steps are idempotent:
 
-    apply-config.py render   write compose/.env and compose/Caddyfile
-    apply-config.py apply    create the domains and mailboxes in Stalwart
+    apply-config.py render         write compose/.env and compose/Caddyfile
+                                   (and the fail2ban jail when webmail is on)
+    apply-config.py apply          create the domains and mailboxes in Stalwart
+    apply-config.py webmail        set the SnappyMail admin key and client IP
+    apply-config.py allow-webmail  exempt SnappyMail from Stalwart's IP ban
 
 `render` runs before the stack starts, `apply` after it is up. bin/setup.sh
 calls both in order; run either on its own after editing mailserver.conf.
@@ -21,12 +24,28 @@ import secrets
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONF = os.path.join(ROOT, "mailserver.conf")
 COMPOSE = os.path.join(ROOT, "compose")
 PASSWORDS = os.path.join(ROOT, "mailbox-passwords.txt")
 CLI = os.path.join(ROOT, "bin", "sw-cli.sh")
+
+ADMIN_KEY_FILE = os.path.join(ROOT, "snappymail-admin-key.txt")
+SNAPPYMAIL_DATA = os.path.join(COMPOSE, "snappymail_data", "_data_", "_default_")
+SNAPPYMAIL_INI = os.path.join(SNAPPYMAIL_DATA, "configs", "application.ini")
+SNAPPYMAIL_AUTH_LOG = os.path.join(SNAPPYMAIL_DATA, "logs", "auth.log")
+FAIL2BAN_DIR = os.path.join(COMPOSE, "fail2ban")
+
+# mail_net in compose/docker-compose.yml. Docker hands out dynamic addresses
+# only inside MAIL_DYNAMIC_RANGE, so SNAPPYMAIL_IP never goes to another
+# container.
+MAIL_SUBNET = "172.16.89.0/24"
+MAIL_DYNAMIC_RANGE = "172.16.89.128/25"
+SNAPPYMAIL_IP = "172.16.89.10"
+SNAPPYMAIL_REASON = ("SnappyMail webmail; brute force is banned by fail2ban "
+                     "on the host")
 
 SCALARS = ("hostname", "acme_email", "admin_password", "webmail_host")
 
@@ -141,6 +160,14 @@ def render(conf):
     print("wrote compose/Caddyfile (%s)"
           % ("with webmail" if conf["webmail_host"] else "no webmail"))
 
+    if conf["webmail_host"]:
+        write_private(
+            os.path.join(FAIL2BAN_DIR, "jail.d", "snappymail.local"),
+            substitute(os.path.join("fail2ban", "jail.d",
+                                    "snappymail.local.template"),
+                       {"AUTH_LOG": SNAPPYMAIL_AUTH_LOG}))
+        print("wrote compose/fail2ban/jail.d/snappymail.local")
+
 
 # --------------------------------------------------------------------------
 # apply
@@ -240,13 +267,96 @@ def save_passwords(created):
 
 
 # --------------------------------------------------------------------------
+# webmail
+# --------------------------------------------------------------------------
+
+def patch_snappymail_ini(text, key):
+    """Set the admin panel key and trust the client IP from the proxy."""
+    wanted = {
+        ("admin_panel", "key"): 'key = "%s"' % key,
+        ("labs", "http_client_ip_check_proxy"): "http_client_ip_check_proxy = On",
+    }
+    found = set()
+    section = None
+    lines = text.splitlines(True)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+            continue
+        name = stripped.split("=", 1)[0].strip()
+        if (section, name) in wanted and "=" in stripped:
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[index] = wanted[(section, name)] + ending
+            found.add((section, name))
+    for section, name in wanted:
+        if (section, name) not in found:
+            die("%s: no `%s` line under [%s]; unexpected SnappyMail version"
+                % (SNAPPYMAIL_INI, name, section))
+    return "".join(lines)
+
+
+def admin_key():
+    """The SnappyMail admin panel key, generated once and kept on file."""
+    if not os.path.exists(ADMIN_KEY_FILE):
+        write_private(ADMIN_KEY_FILE, secrets.token_hex(12) + "\n")
+    with open(ADMIN_KEY_FILE, encoding="utf-8") as handle:
+        return handle.read().strip()
+
+
+def webmail(conf):
+    if not conf["webmail_host"]:
+        die("%s: `webmail_host` is not set" % CONF)
+
+    # SnappyMail writes application.ini on its first run. Ask it for a page
+    # in case it has not run yet, then wait for the file.
+    if not os.path.exists(SNAPPYMAIL_INI):
+        subprocess.run(["docker", "exec", "snappymail", "wget", "-q",
+                        "-O", "/dev/null", "http://127.0.0.1:8888/"],
+                       stdin=subprocess.DEVNULL, capture_output=True)
+        for _ in range(60):
+            if os.path.exists(SNAPPYMAIL_INI):
+                break
+            time.sleep(1)
+        else:
+            die("%s did not appear within 60 s. Check that the snappymail "
+                "container is running: docker logs snappymail" % SNAPPYMAIL_INI)
+
+    generated = not os.path.exists(ADMIN_KEY_FILE)
+    key = admin_key()
+    with open(SNAPPYMAIL_INI, encoding="utf-8") as handle:
+        text = patch_snappymail_ini(handle.read(), key)
+    write_private(SNAPPYMAIL_INI, text)
+    print("webmail  admin panel key %s (snappymail-admin-key.txt)"
+          % ("generated" if generated else "kept"))
+    print("webmail  client IP taken from the proxy")
+
+
+def allow_webmail(conf):
+    """Exempt the webmail container from Stalwart's automatic IP ban."""
+    if any(SNAPPYMAIL_IP in row for row in table(cli("query", "AllowedIp"))):
+        print("allowip  %-32s exists" % SNAPPYMAIL_IP)
+    else:
+        cli("create", "AllowedIp",
+            "--field", "address=%s" % SNAPPYMAIL_IP,
+            "--field", "reason=%s" % SNAPPYMAIL_REASON)
+        print("allowip  %-32s created" % SNAPPYMAIL_IP)
+    cli("create", "Action/ReloadSettings")
+    print("settings reloaded")
+
+
+# --------------------------------------------------------------------------
+
+COMMANDS = {"render": render, "apply": apply, "webmail": webmail,
+            "allow-webmail": allow_webmail}
+
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("render", "apply"):
-        sys.stderr.write("usage: apply-config.py render|apply\n")
+    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
+        sys.stderr.write("usage: apply-config.py "
+                         "render|apply|webmail|allow-webmail\n")
         raise SystemExit(2)
-    conf = read_conf()
-    (render if sys.argv[1] == "render" else apply)(conf)
+    COMMANDS[sys.argv[1]](read_conf())
 
 
 if __name__ == "__main__":
