@@ -15,7 +15,7 @@ jobs:
     name: config parser and templates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Unit tests
         run: python3 tests/test_config.py
 
@@ -23,7 +23,7 @@ jobs:
     name: shell syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: POSIX sh syntax
         run: |
           for script in bin/*.sh tests/*.sh; do
@@ -48,6 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: End-to-end run
         run: tests/integration.sh
